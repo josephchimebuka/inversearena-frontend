@@ -1,6 +1,9 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
+    Env, Symbol,
+};
 
 const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
 const TOPIC_PAYOUT_EXECUTED: Symbol = symbol_short!("PAYOUT");
@@ -20,6 +23,15 @@ pub struct PayoutData {
     pub paid: bool,
 }
 
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum PayoutError {
+    UnauthorizedCaller = 1,
+    InvalidAmount = 2,
+    AlreadyPaid = 3,
+}
+
 #[contract]
 pub struct PayoutContract;
 
@@ -32,7 +44,7 @@ impl PayoutContract {
     ///
     /// # Authorization
     /// None — open to any caller.
-    pub fn hello(env: Env) -> u32 {
+        pub fn hello(_env: Env) -> u32 {
         789
     }
 
@@ -57,7 +69,7 @@ impl PayoutContract {
         winner: Address,
         amount: i128,
         currency: Symbol,
-    ) {
+    ) -> Result<(), PayoutError> {
         let admin: Address = env
             .storage()
             .instance()
@@ -65,11 +77,11 @@ impl PayoutContract {
             .expect("not initialized");
 
         if caller != admin {
-            panic!("caller is not authorized to distribute winnings");
+            panic_with_error!(&env, PayoutError::UnauthorizedCaller);
         }
 
         if amount <= 0 {
-            panic!("amount must be positive");
+            panic_with_error!(&env, PayoutError::InvalidAmount);
         }
 
         let payout_key = DataKey::Payout(idempotency_key, winner.clone());
@@ -79,7 +91,7 @@ impl PayoutContract {
             .get::<_, PayoutData>(&payout_key)
             .is_some()
         {
-            panic!("payout already processed for this idempotency key");
+            panic_with_error!(&env, PayoutError::AlreadyPaid);
         }
 
         let payout_data = PayoutData {
@@ -92,6 +104,8 @@ impl PayoutContract {
 
         env.events()
             .publish((TOPIC_PAYOUT_EXECUTED,), (winner, amount, currency));
+
+        Ok(())
     }
 
     pub fn is_payout_processed(env: Env, idempotency_key: u32, winner: Address) -> bool {

@@ -48,7 +48,6 @@ fn test_admin_can_distribute_winnings() {
 }
 
 #[test]
-#[should_panic(expected = "caller is not authorized to distribute winnings")]
 fn test_unauthorized_caller_cannot_distribute() {
     let (env, _admin, client) = setup();
     let unauthorized = Address::generate(&env);
@@ -57,11 +56,12 @@ fn test_unauthorized_caller_cannot_distribute() {
     let amount = 1000i128;
     let currency = symbol_short!("XLM");
 
-    client.distribute_winnings(&unauthorized, &idempotency_key, &winner, &amount, &currency);
+    let result =
+        client.try_distribute_winnings(&unauthorized, &idempotency_key, &winner, &amount, &currency);
+    assert_eq!(result, Err(Ok(PayoutError::UnauthorizedCaller)));
 }
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
 fn test_zero_amount_panics() {
     let (env, admin, client) = setup();
     let winner = Address::generate(&env);
@@ -69,11 +69,11 @@ fn test_zero_amount_panics() {
     let amount = 0i128;
     let currency = symbol_short!("XLM");
 
-    client.distribute_winnings(&admin, &idempotency_key, &winner, &amount, &currency);
+    let result = client.try_distribute_winnings(&admin, &idempotency_key, &winner, &amount, &currency);
+    assert_eq!(result, Err(Ok(PayoutError::InvalidAmount)));
 }
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
 fn test_negative_amount_panics() {
     let (env, admin, client) = setup();
     let winner = Address::generate(&env);
@@ -81,12 +81,12 @@ fn test_negative_amount_panics() {
     let amount = -100i128;
     let currency = symbol_short!("XLM");
 
-    client.distribute_winnings(&admin, &idempotency_key, &winner, &amount, &currency);
+    let result = client.try_distribute_winnings(&admin, &idempotency_key, &winner, &amount, &currency);
+    assert_eq!(result, Err(Ok(PayoutError::InvalidAmount)));
 }
 
 #[test]
-#[should_panic(expected = "payout already processed for this idempotency key")]
-fn test_idempotency_prevents_double_pay() {
+fn test_idempotency_prevents_double_pay_same_amount() {
     let (env, admin, client) = setup();
     let winner = Address::generate(&env);
     let idempotency_key = 1u32;
@@ -94,7 +94,46 @@ fn test_idempotency_prevents_double_pay() {
     let currency = symbol_short!("XLM");
 
     client.distribute_winnings(&admin, &idempotency_key, &winner, &amount, &currency);
-    client.distribute_winnings(&admin, &idempotency_key, &winner, &amount, &currency);
+
+    let second_attempt =
+        client.try_distribute_winnings(&admin, &idempotency_key, &winner, &amount, &currency);
+    assert_eq!(second_attempt, Err(Ok(PayoutError::AlreadyPaid)));
+
+    // The persisted payout amount must remain unchanged after the failed retry.
+    let payout = client.get_payout(&idempotency_key, &winner).unwrap();
+    assert_eq!(payout.amount, amount);
+}
+
+#[test]
+fn test_idempotency_prevents_double_pay_different_amount() {
+    let (env, admin, client) = setup();
+    let winner = Address::generate(&env);
+    let idempotency_key = 99u32;
+    let first_amount = 1000i128;
+    let second_amount = 9999i128;
+    let currency = symbol_short!("USDC");
+
+    client
+        .distribute_winnings(
+            &admin,
+            &idempotency_key,
+            &winner,
+            &first_amount,
+            &currency,
+        );
+
+    let second_attempt = client.try_distribute_winnings(
+        &admin,
+        &idempotency_key,
+        &winner,
+        &second_amount,
+        &currency,
+    );
+    assert_eq!(second_attempt, Err(Ok(PayoutError::AlreadyPaid)));
+
+    // Balance-equivalent assertion: only the original payout record is retained.
+    let payout = client.get_payout(&idempotency_key, &winner).unwrap();
+    assert_eq!(payout.amount, first_amount);
 }
 
 #[test]

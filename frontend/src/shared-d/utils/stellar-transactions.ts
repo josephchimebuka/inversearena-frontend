@@ -38,8 +38,7 @@ import {
 import {
   buildClaimCallOperation,
   buildCreatePoolCallOperation,
-  buildGetArenaStateCallOperation,
-  buildGetUserStateCallOperation,
+  buildGetFullStateCallOperation,
   buildJoinCallOperation,
   buildStakeCallOperation,
   buildSubmitChoiceCallOperation,
@@ -321,8 +320,14 @@ export async function fetchArenaState(
       "0",
     );
 
-    const getStateOperation =
-      buildGetArenaStateCallOperation(arenaContract);
+    const stateReaderAddress =
+      validatedUserAddress ||
+      "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+    const getStateOperation = buildGetFullStateCallOperation(
+      arenaContract,
+      stateReaderAddress,
+    );
     const stateTx = composeUnsignedTransaction(dummyAccount, {
       fee: getDefaultInvokeBaseFee(),
       networkPassphrase: NETWORK_PASSPHRASE,
@@ -356,35 +361,8 @@ export async function fetchArenaState(
     const currentStake = extractI128FromScVal(stateData, "current_stake") || 0;
     const potentialPayout =
       extractI128FromScVal(stateData, "potential_payout") || 0;
-
-    let isUserIn = false;
-    let hasWon = false;
-
-    if (validatedUserAddress) {
-      const userStateOperation = buildGetUserStateCallOperation(
-        arenaContract,
-        validatedUserAddress,
-      );
-
-      const userStateTx = composeUnsignedTransaction(dummyAccount, {
-        fee: getDefaultInvokeBaseFee(),
-        networkPassphrase: NETWORK_PASSPHRASE,
-        timeout: getShortTxTimeoutSeconds(),
-        operation: userStateOperation,
-      });
-
-      const userSimulation = await server.simulateTransaction(userStateTx);
-
-      if (
-        !("error" in userSimulation) &&
-        "result" in userSimulation &&
-        userSimulation.result?.retval
-      ) {
-        const userData = userSimulation.result.retval;
-        isUserIn = extractBoolFromScVal(userData, "is_active") || false;
-        hasWon = extractBoolFromScVal(userData, "has_won") || false;
-      }
-    }
+    const isUserIn = extractBoolFromScVal(stateData, "is_active") || false;
+    const hasWon = extractBoolFromScVal(stateData, "has_won") || false;
 
     return {
       arenaId: validatedArenaId,
