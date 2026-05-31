@@ -16,21 +16,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
       - uses: actions/setup-node@v4
         with:
           node-version: "20.x"
-          cache: "pnpm"
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile --ignore-scripts
+        run: npm ci
 
       - name: TypeScript typecheck
-        run: pnpm exec tsc --noEmit
+        run: npx tsc --noEmit
 
       - name: Jest unit tests
-        run: pnpm exec jest --ci --runInBand --passWithNoTests
+        run: npm run test:frontend -- --ci --runInBand --passWithNoTests
